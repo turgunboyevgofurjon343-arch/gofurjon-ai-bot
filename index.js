@@ -80,15 +80,22 @@ app.post("/telegram-webhook", async (req, res) => {
         text: answer.slice(i, i + 4000)
       });
     }
+  
   } catch (error) {
-    console.error("Xato:", error.message);
+    console.error("AI API xatosi:", {
+      message: error.message,
+      status: error.status,
+      code: error.code,
+      type: error.type
+    });
+
     try {
-      await telegram("sendMessage", {
-        chat_id: chatId,
-        text: "Hozir javob berishda xatolik yuz berdi. Keyinroq urinib ko‘ring."
-      });
+      await bot.sendMessage(
+        msg.chat.id,
+        "Hozir javob berishda xatolik yuz berdi. Keyinroq urinib ko‘ring."
+      );
     } catch (sendError) {
-      console.error("Telegram xabari yuborilmadi:", sendError.message);
+      console.error("Telegram xatosi:", sendError.message);
     }
   }
 });
