@@ -2,7 +2,6 @@
 require("dotenv").config();
 
 const express = require("express");
-const TelegramBot = require("node-telegram-bot-api");
 const OpenAI = require("openai");
 
 const app = express();
@@ -16,48 +15,81 @@ if (!token || !apiKey) {
   process.exit(1);
 }
 
-const bot = new TelegramBot(token, { polling: false });
 const openai = new OpenAI({ apiKey });
+
+async function telegram(method, body) {
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/${method}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+
+  const data = await response.json();
+
+  if (!data.ok) {
+    throw new Error(data.description || "Telegram API xatosi");
+  }
+
+  return data.result;
+}
 
 app.get("/", (req, res) => {
   res.send("Gofurjon AI bot serveri ishlayapti!");
 });
 
-app.post("/telegram-webhook", (req, res) => {
-  bot.processUpdate(req.body);
+app.post("/telegram-webhook", async (req, res) => {
+  // Telegram yangilanish qabul qilinganini tezda tasdiqlaymiz.
   res.sendStatus(200);
-});
 
-bot.onText(/\/start/, async (msg) => {
-  await bot.sendMessage(
-    msg.chat.id,
-    "Salom! Men Gofurjon AI botman 🤖\nSavolingizni yozing!"
-  );
-});
+  const msg = req.body?.message;
+  const chatId = msg?.chat?.id;
+  const userText = msg?.text;
 
-bot.on("message", async (msg) => {
-  const text = msg.text;
-
-  if (!text || text.startsWith("/")) return;
+  if (!chatId || !userText) return;
 
   try {
-    await bot.sendChatAction(msg.chat.id, "typing");
+    if (userText.startsWith("/start")) {
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: "Salom! Men Gofurjon AI botman 🤖\nSavolingizni yozing!"
+      });
+      return;
+    }
 
-    const response = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: text
+    if (userText.startsWith("/")) return;
+
+    await telegram("sendChatAction", {
+      chat_id: chatId,
+      action: "typing"
     });
 
-    await bot.sendMessage(
-      msg.chat.id,
-      response.output_text || "Javob topilmadi."
-    );
+    const result = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: userText
+    });
+
+    const answer = result.output_text || "Javob topilmadi.";
+
+    // Telegram matn chegarasidan oshmasligi uchun bo‘lib yuboramiz.
+    for (let i = 0; i < answer.length; i += 4000) {
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: answer.slice(i, i + 4000)
+      });
+    }
   } catch (error) {
-    console.error("API xatosi:", error.status || "noma'lum");
-    await bot.sendMessage(
-      msg.chat.id,
-      "Hozir javob berishda xatolik yuz berdi."
-    );
+    console.error("Xato:", error.message);
+    try {
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: "Hozir javob berishda xatolik yuz berdi. Keyinroq urinib ko‘ring."
+      });
+    } catch (sendError) {
+      console.error("Telegram xabari yuborilmadi:", sendError.message);
+    }
   }
 });
 
@@ -70,7 +102,9 @@ app.listen(PORT, async () => {
 
   if (baseUrl) {
     try {
-      await bot.setWebHook(`${baseUrl}/telegram-webhook`);
+      await telegram("setWebhook", {
+        url: `${baseUrl}/telegram-webhook`
+      });
       console.log("Telegram webhook sozlandi!");
     } catch (error) {
       console.error("Webhook sozlash xatosi:", error.message);
